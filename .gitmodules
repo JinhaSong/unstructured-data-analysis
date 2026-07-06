@@ -1,0 +1,3 @@
+[submodule "libs/hwplib"]
+	path = libs/hwplib
+	url = https://github.com/neolord0/hwplib.git
