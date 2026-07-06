@@ -1,0 +1,17 @@
+# udav1 dependencies -- ALL commercially safe (license noted per line).
+# Core is stdlib-only; installs below unlock formats/quality tiers.
+
+# --- format parsers (Layer 1) ---
+charset-normalizer>=3.3     # MIT     -- txt encoding detection (CP949/UTF-8-BOM)
+openpyxl>=3.1               # MIT     -- xlsx cuesheets
+pdfplumber>=0.11            # MIT     -- pdf fallback backend
+# docling>=2.0              # MIT     -- pdf primary backend (heavier; enable when needed)
+jpype1>=1.5                 # Apache-2.0 -- JVM bridge for libs/hwplib (hwp files)
+
+# --- analyze (Layer 2) ---
+kiwipiepy>=0.18             # LGPL-2.1 (dynamic link -> commercial OK) -- sentence split
+rapidfuzz>=3.9              # MIT     -- optional fuzzy scoring
+# sentence-transformers>=3.0  # Apache-2.0 -- tier-B embeddings (BAAI/bge-m3, MIT weights)
+
+# NOT allowed (license): pyhwp(GPL), PyMuPDF(AGPL), marker-pdf(GPL+OpenRAIL-M),
+# konlpy(GPL), EXAONE(non-commercial), mT5-XLSum(CC-BY-NC data)
