@@ -9,7 +9,11 @@ import re
 from ..schema import Relation
 
 _PLAYS_PAT = re.compile(r"([가-힣]{2,4})\s*\(\s*([가-힣A-Za-z]{2,10})\s*분\s*\)")
-_SENT_SPLIT = re.compile(r"(?<=[.!?다요])\s+")
+_SENT_SPLIT = re.compile(r"(?<=[.!?다요])\s+|\n+")   # 줄바꿈도 문장 경계로
+
+# 공기(co-occurrence) 관계를 뽑을 문서 유형 — 서사 텍스트만.
+# cast_info처럼 인물이 나열되는 문서는 전체 쌍이 생성되는 노이즈가 되므로 제외.
+NARRATIVE_DOC_TYPES = ("article", "episode_summary", "synopsis", "narration")
 
 
 def relations_from_metadata(program_meta: dict | None, cast_data: dict | None,

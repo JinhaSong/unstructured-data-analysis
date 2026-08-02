@@ -21,8 +21,8 @@ import os
 from .analyze.ner import DomainNER, MODEL_ID as NER_MODEL, build_gazetteer
 from .analyze.normalize import NormalizeContext, normalize_entities
 from .analyze.refine import refine_article
-from .analyze.relations import (dedup, relations_from_metadata,
-                                relations_from_text)
+from .analyze.relations import (NARRATIVE_DOC_TYPES, dedup,
+                                relations_from_metadata, relations_from_text)
 from .ingest.txt_meta import parse_txt
 
 _SUMMARIZE_TYPES = {"synopsis", "article"}
@@ -86,8 +86,9 @@ def build_ud_result(data_dir, docs, per_doc, relations, program_fields,
                     cast_data, schedule_data):
     """UD 최종 산출 — 비정형 데이터 정보를 구조화해 담은 **단일 JSON**.
 
-    타임코드는 부여하지 않는다(협의). 대신 시계열 정렬(TA) 모듈이 씬 단위
-    의미 정렬에 쓸 수 있는 키·단위를 ``temporal_alignment`` 블록에 담는다.
+    타임코드는 부여하지 않는다(협의). 시계열 정렬용 파생 데이터(정렬 키·서사
+    단위)는 UD 출력에 포함하지 않으며, TA 모델 단계에서 이 ud_result를 입력으로
+    ``analyze/ta_prep.py``가 생성한다(협의 — TA 결과물에 속함).
     """
     content_id = os.path.basename(os.path.normpath(data_dir))
 
@@ -131,61 +132,6 @@ def build_ud_result(data_dir, docs, per_doc, relations, program_fields,
                 "entities": {t: sorted(v) for t, v in sorted(uniq.items())},
             })
 
-    # ── 시계열 정렬(TA) 활용 데이터 ──
-    narrative_units, unit_no = [], 0
-    for en in episode_narratives:
-        unit_no += 1
-        narrative_units.append({
-            "unit_id": f"u{unit_no:03d}", "episodes": en.get("episodes"),
-            "text": en.get("summary"), "characters": en.get("characters"),
-            "source": {"doc_id": en.get("source_doc"), "kind": "episode_summary"}})
-    for doc, info in zip(docs, per_doc):
-        if doc.doc_type != "article":
-            continue
-        ents_by_seg = _entities_by_seg(info["entities"])
-        ep_hints = sorted({int(n) for e in info["entities"]
-                           if e.tag == "EPISODE" and e.normalized
-                           and not e.normalized.startswith(("total", "final"))
-                           for n in e.normalized.split(",") if n.isdigit()})
-        for n in (info["refined"] or {}).get("narrative", []):
-            unit_no += 1
-            segs = ents_by_seg.get(n["seg_id"], [])
-            narrative_units.append({
-                "unit_id": f"u{unit_no:03d}",
-                "episodes": ep_hints or None,
-                "text": n["text"],
-                "characters": sorted({e.text for e in segs
-                                      if e.tag == "CHARACTER"}),
-                "events": sorted({e.text for e in segs if e.tag == "EVENT"}),
-                "source": {"doc_id": doc.doc_id, "seg_id": n["seg_id"],
-                           "kind": "article_narrative"}})
-
-    anchors = {}
-    for ent in schedule:
-        no = ent.get("episode_no")
-        if no:
-            anchors[no] = {"episode_no": no, "air_date": ent.get("date"),
-                           "day": ent.get("day"), "start": ent.get("start"),
-                           "end": ent.get("end"), "note": ent.get("note")}
-    for ep in episodes:
-        no = ep.get("episode_no")
-        if no:
-            anchors.setdefault(no, {"episode_no": no})
-            anchors[no].setdefault("air_date", ep.get("date"))
-            if ep.get("rating") is not None:
-                anchors[no]["rating"] = ep.get("rating")
-    for en in episode_narratives:
-        for no in en.get("episodes") or []:
-            if no in anchors:
-                anchors[no].setdefault("narratives", []).append(en["summary"])
-
-    all_entities = [e for info in per_doc for e in info["entities"]]
-    match_terms = {}
-    for tag in ("PROGRAM", "CHARACTER", "ACTOR", "LOCATION", "EVENT", "STAFF"):
-        terms = sorted({e.text for e in all_entities if e.tag == tag})
-        if terms:
-            match_terms[tag] = terms
-
     return {
         "content_id": content_id,
         "program": program_fields or None,
@@ -196,18 +142,6 @@ def build_ud_result(data_dir, docs, per_doc, relations, program_fields,
         "episode_narratives": episode_narratives,
         "articles": articles,
         "relations": [r.to_dict() for r in relations],
-        "temporal_alignment": {
-            "note": ("타임코드 미부여(협의) — 씬 단위 의미 정렬용 데이터. "
-                     "MMCA 씬/ASR과의 실제 정렬은 TA 모듈이 수행"),
-            "characters": [{"character": p.get("character"),
-                            "actor": p.get("actor"),
-                            "aliases": [x for x in (p.get("character"),
-                                                    p.get("actor")) if x],
-                            "description": p.get("description")} for p in cast],
-            "episode_anchors": [anchors[k] for k in sorted(anchors)],
-            "narrative_units": narrative_units,
-            "match_terms": match_terms,
-        },
         "documents": [{"doc_id": d.doc_id, "doc_type": d.doc_type,
                        "source_file": os.path.relpath(d.source_path, data_dir),
                        "n_segments": len(d.segments),
@@ -275,7 +209,9 @@ def structurize_dir(data_dir: str, use_model: bool = True,
             summary = {"text": gen["summary"], "model": gen["model"],
                        "input": "narrative_fact" if refined else "full_text"}
 
-        all_rels.extend(relations_from_text(doc.doc_id, doc.full_text, entities))
+        if doc.doc_type in NARRATIVE_DOC_TYPES:   # 서사 텍스트만 공기 관계 대상
+            all_rels.extend(
+                relations_from_text(doc.doc_id, doc.full_text, entities))
         per_doc.append({"entities": entities, "summary": summary,
                         "refined": refined})
 
@@ -299,12 +235,9 @@ def main():
     out_path = os.path.join(out_dir, "ud_result.json")
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False, indent=2)
-    ta = result["temporal_alignment"]
     print(f"[udav2] docs={len(result['documents'])} "
           f"entities={sum(d['n_entities'] for d in result['documents'])} "
-          f"relations={len(result['relations'])} "
-          f"ta_units={len(ta['narrative_units'])} "
-          f"anchors={len(ta['episode_anchors'])} -> {out_path}")
+          f"relations={len(result['relations'])} -> {out_path}")
 
 
 if __name__ == "__main__":
