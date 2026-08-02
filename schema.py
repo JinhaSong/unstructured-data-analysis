@@ -15,6 +15,22 @@ from dataclasses import dataclass, field, asdict
 #   clip_meta       영상 메타      (.mp4.xml clipInfo)
 DOC_TYPES = ("cuesheet", "narration", "schedule", "subtitle_script", "clip_meta")
 
+# udav2 (docs/ud-analysis-model-design.md): 웹·부가정보 JSON + ASR 전사까지 확장.
+DOC_TYPES_V2 = DOC_TYPES + (
+    "asr_transcript", "synopsis", "episode_summary", "cast_info",
+    "episode_info", "article", "program_meta", "other")
+
+# 방송 도메인 NER 태그셋 — 핵심 12종 + 서사·부가 확장 6종 (설계서 §3)
+NER_TAGS = (
+    "PROGRAM", "EPISODE", "CHARACTER", "ACTOR", "STAFF", "PERSON",
+    "BROADCASTER", "PLATFORM", "PRODUCTION", "DATE", "TIME", "LOCATION",
+    "EVENT", "GENRE", "ORGANIZATION", "MUSIC", "RATING", "QUANTITY")
+
+# 관계 8종 (설계서 §4)
+RELATION_TYPES = (
+    "plays", "appears_in", "directed_by", "written_by", "aired_on",
+    "scheduled_at", "produced_by", "char_rel", "involved_in")
+
 
 @dataclass
 class Segment:
@@ -62,6 +78,70 @@ class TimeCodedSummary:
     source_seg_ids: list = field(default_factory=list)
     keywords: list = field(default_factory=list)
     speaker: str | None = None
+
+    def to_dict(self):
+        return asdict(self)
+
+
+@dataclass
+class Entity:
+    """One NER span. ``source``: gazetteer | rule | model(<name>)."""
+    tag: str                                  # one of NER_TAGS
+    text: str
+    doc_id: str
+    seg_id: str | None = None
+    start: int | None = None                  # char offsets within the segment text
+    end: int | None = None
+    score: float = 1.0
+    source: str = "rule"
+    normalized: str | None = None             # canonical form (e.g. date -> ISO)
+
+    def to_dict(self):
+        return asdict(self)
+
+
+@dataclass
+class Relation:
+    """One typed relation between two entities (or entity -> literal)."""
+    rel: str                                  # one of RELATION_TYPES
+    head: str                                 # entity surface (canonical form)
+    head_tag: str
+    tail: str
+    tail_tag: str
+    doc_id: str | None = None                 # evidence document
+    evidence: str | None = None               # evidence sentence/field
+    score: float = 1.0
+    source: str = "rule"
+
+    def to_dict(self):
+        return asdict(self)
+
+
+@dataclass
+class StructuredDocResult:
+    """udav2 per-document output: classification + entities + summary."""
+    doc_id: str
+    doc_type: str                             # one of DOC_TYPES_V2
+    doc_class_method: str = "rule"            # rule | model
+    source_path: str = ""
+    entities: list = field(default_factory=list)       # list[Entity]
+    summary: str | None = None                # generative (KoBART) summary
+    summary_model: str | None = None
+    evidence_summary: list = field(default_factory=list)  # extractive fallback
+    segments_analyzed: int = 0
+
+    def to_dict(self):
+        return asdict(self)
+
+
+@dataclass
+class ProgramStructuredResult:
+    """udav2 program-level bundle -> TA 입력 및 CMG/RAG 소스."""
+    content_id: str
+    program_title: str | None = None
+    documents: list = field(default_factory=list)      # list[StructuredDocResult]
+    relations: list = field(default_factory=list)      # list[Relation] (cross-doc)
+    models: dict = field(default_factory=dict)         # component -> model name/license
 
     def to_dict(self):
         return asdict(self)

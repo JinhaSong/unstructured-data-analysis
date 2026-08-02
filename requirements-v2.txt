@@ -1,0 +1,6 @@
+# udav2 (구조화 분석) 추가 의존성 — 전부 Apache-2.0/MIT/BSD 계열
+# 모델: monologg/koelectra-base-v3-naver-ner (Apache-2.0),
+#       gogamza/kobart-summarization (MIT), BAAI/bge-m3 (MIT, 선택)
+torch>=2.2
+transformers>=4.40
+sentencepiece
